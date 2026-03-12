@@ -1,0 +1,37 @@
+flowchart TB
+    subgraph Cliente
+        A([Inicio])
+        B[Ver catálogo]
+        C{¿Producto disponible?}
+        D[Agregar producto al carrito]
+        E[Ver/editar carrito]
+        F{¿Carrito vacío?}
+        G[Confirmar pedido]
+        H[Consultar estado del pedido]
+        I([Fin cliente])
+    end
+
+    subgraph Sistema
+        S1[Mostrar productos, precio y disponibilidad]
+        S2[Actualizar cantidades y total]
+        S3[Crear pedido y detalle]
+        S4[Asignar estado RECIBIDO]
+        S5[Mostrar número de pedido]
+        S6[Actualizar estado visible]
+    end
+
+    subgraph Cafetin
+        K1[Ver pedidos recibidos]
+        K2[Preparar pedido]
+        K3[Marcar LISTO]
+        K4[Entregar pedido]
+        K5([Fin operativo])
+    end
+
+    A --> B --> S1 --> C
+    C -- No --> B
+    C -- Sí --> D --> S2 --> E --> F
+    F -- Sí --> E
+    F -- No --> G --> S3 --> S4 --> S5 --> H
+    H --> S6 --> K1 --> K2 --> K3 --> K4 --> K5
+    K4 --> I

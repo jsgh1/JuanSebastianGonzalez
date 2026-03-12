@@ -1,0 +1,22 @@
+flowchart TD
+    A([Inicio]) --> B[Mostrar catálogo]
+    B --> C{Selecciona producto?}
+    C -- No --> B
+    C -- Sí --> D{Está disponible?}
+    D -- No --> B
+    D -- Sí --> E[Agregar al carrito]
+    E --> F[Ver carrito]
+    F --> G{Desea modificar?}
+    G -- Sí --> H[Actualizar cantidad o eliminar]
+    H --> F
+    G -- No --> I{Carrito vacío?}
+    I -- Sí --> F
+    I -- No --> J[Confirmar pedido]
+    J --> K[Crear orden y detalle]
+    K --> L[Estado = RECIBIDO]
+    L --> M[Cafetín ve el pedido]
+    M --> N[Estado = EN_PREPARACION]
+    N --> O[Estado = LISTO]
+    O --> P[Entregar pedido]
+    P --> Q[Estado = ENTREGADO]
+    Q --> R([Fin])

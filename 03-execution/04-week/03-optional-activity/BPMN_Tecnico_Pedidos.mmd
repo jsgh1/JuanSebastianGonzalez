@@ -1,0 +1,43 @@
+flowchart LR
+    subgraph Frontend["Lane: Frontend / Usuario"]
+        U1([Start])
+        U2[GET /productos]
+        U3[POST /carrito/items]
+        U4[PATCH /carrito/items]
+        U5[POST /pedidos/confirmar]
+        U6[GET /pedidos/{id}/estado]
+        U7([End])
+    end
+
+    subgraph Backend["Lane: Backend / API"]
+        B1[Validar disponibilidad]
+        B2[Validar carrito no vacío]
+        B3[Calcular subtotal y total]
+        B4[Crear pedido]
+        B5[Crear detalle pedido]
+        B6[Asignar estado RECIBIDO]
+        B7[Consultar estado]
+    end
+
+    subgraph DB["Lane: Base de datos"]
+        D1[(product)]
+        D2[(cart)]
+        D3[(cart_item)]
+        D4[(`order`)]
+        D5[(order_item)]
+    end
+
+    subgraph Cafetin["Lane: Operación cafetín"]
+        C1[Ver pedidos]
+        C2[Actualizar a EN_PREPARACION]
+        C3[Actualizar a LISTO]
+        C4[Actualizar a ENTREGADO]
+    end
+
+    U1 --> U2 --> B1 --> D1
+    B1 --> U3 --> D2 --> D3
+    D3 --> U4 --> B3 --> D3
+    D3 --> U5 --> B2
+    B2 -->|válido| B3 --> B4 --> D4 --> B5 --> D5 --> B6 --> D4
+    B2 -->|inválido| U4
+    B6 --> U6 --> B7 --> D4 --> C1 --> C2 --> D4 --> C3 --> D4 --> C4 --> D4 --> U7
