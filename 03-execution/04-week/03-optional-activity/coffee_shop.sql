@@ -515,6 +515,135 @@ INSERT INTO `view` (`id`, `module_id`, `code`, `name`, `description`, `route`, `
 -- --------------------------------------------------------
 
 --
+
+-- --------------------------------------------------------
+
+--
+-- Estructura de tabla para la tabla `role_view`
+-- Permite asignar permisos especificos por vista a cada rol.
+--
+
+CREATE TABLE `role_view` (
+  `role_id` char(36) NOT NULL,
+  `view_id` char(36) NOT NULL,
+  `can_create` tinyint(1) NOT NULL DEFAULT 0,
+  `can_read` tinyint(1) NOT NULL DEFAULT 1,
+  `can_update` tinyint(1) NOT NULL DEFAULT 0,
+  `can_delete` tinyint(1) NOT NULL DEFAULT 0,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NULL DEFAULT NULL,
+  `status` tinyint(1) DEFAULT 1
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Estructura de tabla para la tabla `audit_log`
+-- Registra acciones realizadas por usuarios dentro de modulos y vistas.
+--
+
+CREATE TABLE `audit_log` (
+  `id` char(36) NOT NULL DEFAULT uuid(),
+  `user_id` char(36) DEFAULT NULL,
+  `module_id` char(36) DEFAULT NULL,
+  `view_id` char(36) DEFAULT NULL,
+  `action` varchar(80) NOT NULL,
+  `table_name` varchar(120) DEFAULT NULL,
+  `record_id` char(36) DEFAULT NULL,
+  `old_value` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL CHECK (json_valid(`old_value`)),
+  `new_value` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL CHECK (json_valid(`new_value`)),
+  `ip_address` varchar(60) DEFAULT NULL,
+  `user_agent` text DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Volcado de datos para modulos agregados: usuario, rol, vistas y auditoria
+--
+
+INSERT INTO `module` (`id`, `code`, `name`, `description`, `route`, `icon`, `created_at`, `updated_at`, `deleted_at`, `status`) VALUES
+('11111111-1111-1111-1111-111111111111', 'USR', 'Usuarios', 'Gestion de usuarios del sistema', '/usuarios', 'users', current_timestamp(), NULL, NULL, 1),
+('22222222-2222-2222-2222-222222222222', 'ROL', 'Roles', 'Gestion de roles y perfiles', '/roles', 'key', current_timestamp(), NULL, NULL, 1),
+('33333333-3333-3333-3333-333333333333', 'VIS', 'Vistas', 'Gestion de vistas y rutas del sistema', '/vistas', 'eye', current_timestamp(), NULL, NULL, 1),
+('44444444-4444-4444-4444-444444444444', 'AUD', 'Auditoria', 'Consulta de trazabilidad y movimientos del sistema', '/auditoria', 'history', current_timestamp(), NULL, NULL, 1);
+
+--
+-- Volcado de datos para vistas agregadas
+--
+
+INSERT INTO `view` (`id`, `module_id`, `code`, `name`, `description`, `route`, `created_at`, `updated_at`, `deleted_at`, `status`) VALUES
+('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1', '11111111-1111-1111-1111-111111111111', 'USER_LIST', 'Listado de usuarios', 'Permite consultar usuarios del sistema', '/usuarios/listar', current_timestamp(), NULL, NULL, 1),
+('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2', '11111111-1111-1111-1111-111111111111', 'USER_FORM', 'Formulario de usuarios', 'Permite crear y editar usuarios', '/usuarios/formulario', current_timestamp(), NULL, NULL, 1),
+('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1', '22222222-2222-2222-2222-222222222222', 'ROLE_LIST', 'Listado de roles', 'Permite consultar roles del sistema', '/roles/listar', current_timestamp(), NULL, NULL, 1),
+('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb2', '22222222-2222-2222-2222-222222222222', 'ROLE_FORM', 'Formulario de roles', 'Permite crear y editar roles', '/roles/formulario', current_timestamp(), NULL, NULL, 1),
+('cccccccc-cccc-cccc-cccc-ccccccccccc1', '33333333-3333-3333-3333-333333333333', 'VIEW_LIST', 'Listado de vistas', 'Permite consultar vistas registradas', '/vistas/listar', current_timestamp(), NULL, NULL, 1),
+('cccccccc-cccc-cccc-cccc-ccccccccccc2', '33333333-3333-3333-3333-333333333333', 'VIEW_FORM', 'Formulario de vistas', 'Permite crear y editar vistas', '/vistas/formulario', current_timestamp(), NULL, NULL, 1),
+('dddddddd-dddd-dddd-dddd-ddddddddddd1', '44444444-4444-4444-4444-444444444444', 'AUDIT_LIST', 'Consulta de auditoria', 'Permite consultar trazabilidad del sistema', '/auditoria/listar', current_timestamp(), NULL, NULL, 1),
+('dddddddd-dddd-dddd-dddd-ddddddddddd2', '44444444-4444-4444-4444-444444444444', 'AUDIT_DETAIL', 'Detalle de auditoria', 'Permite revisar el detalle de un registro auditado', '/auditoria/detalle', current_timestamp(), NULL, NULL, 1);
+
+--
+-- Asociacion de modulos y vistas agregadas
+--
+
+INSERT INTO `module_view` (`module_id`, `view_id`, `created_at`, `status`) VALUES
+('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1', current_timestamp(), 1),
+('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2', current_timestamp(), 1),
+('22222222-2222-2222-2222-222222222222', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1', current_timestamp(), 1),
+('22222222-2222-2222-2222-222222222222', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb2', current_timestamp(), 1),
+('33333333-3333-3333-3333-333333333333', 'cccccccc-cccc-cccc-cccc-ccccccccccc1', current_timestamp(), 1),
+('33333333-3333-3333-3333-333333333333', 'cccccccc-cccc-cccc-cccc-ccccccccccc2', current_timestamp(), 1),
+('44444444-4444-4444-4444-444444444444', 'dddddddd-dddd-dddd-dddd-ddddddddddd1', current_timestamp(), 1),
+('44444444-4444-4444-4444-444444444444', 'dddddddd-dddd-dddd-dddd-ddddddddddd2', current_timestamp(), 1);
+
+--
+-- Usuario administrador para gestionar usuarios, roles, vistas y auditoria
+--
+
+INSERT INTO `person` (`id`, `type_document_id`, `document_number`, `first_name`, `last_name`, `email`, `phone`, `created_at`, `updated_at`, `deleted_at`, `status`) VALUES
+('55555555-5555-5555-5555-555555555555', '2e5055dd-1e68-11f1-be96-98eecb02157a', '100000000', 'Administrador', 'Sistema', 'admin@coffee.com', '300000000', current_timestamp(), NULL, NULL, 1);
+
+INSERT INTO `user` (`id`, `username`, `email`, `password_hash`, `person_id`, `created_at`, `updated_at`, `deleted_at`, `status`) VALUES
+('66666666-6666-6666-6666-666666666666', 'admin', 'admin@coffee.com', 'hash_admin_123', '55555555-5555-5555-5555-555555555555', current_timestamp(), NULL, NULL, 1);
+
+INSERT INTO `user_role` (`user_id`, `role_id`, `created_at`, `status`) VALUES
+('66666666-6666-6666-6666-666666666666', '2e785c68-1e68-11f1-be96-98eecb02157a', current_timestamp(), 1);
+
+--
+-- Permisos de modulos agregados para el rol ADMIN
+--
+
+INSERT INTO `role_module` (`role_id`, `module_id`, `created_at`, `status`) VALUES
+('2e785c68-1e68-11f1-be96-98eecb02157a', '2e8dfe45-1e68-11f1-be96-98eecb02157a', current_timestamp(), 1),
+('2e785c68-1e68-11f1-be96-98eecb02157a', '2e8e0519-1e68-11f1-be96-98eecb02157a', current_timestamp(), 1),
+('2e785c68-1e68-11f1-be96-98eecb02157a', '2e8e0590-1e68-11f1-be96-98eecb02157a', current_timestamp(), 1),
+('2e785c68-1e68-11f1-be96-98eecb02157a', '2e8e0641-1e68-11f1-be96-98eecb02157a', current_timestamp(), 1),
+('2e785c68-1e68-11f1-be96-98eecb02157a', '2e8e0688-1e68-11f1-be96-98eecb02157a', current_timestamp(), 1),
+('2e785c68-1e68-11f1-be96-98eecb02157a', '11111111-1111-1111-1111-111111111111', current_timestamp(), 1),
+('2e785c68-1e68-11f1-be96-98eecb02157a', '22222222-2222-2222-2222-222222222222', current_timestamp(), 1),
+('2e785c68-1e68-11f1-be96-98eecb02157a', '33333333-3333-3333-3333-333333333333', current_timestamp(), 1),
+('2e785c68-1e68-11f1-be96-98eecb02157a', '44444444-4444-4444-4444-444444444444', current_timestamp(), 1);
+
+--
+-- Permisos por vista para el rol ADMIN
+--
+
+INSERT INTO `role_view` (`role_id`, `view_id`, `can_create`, `can_read`, `can_update`, `can_delete`, `created_at`, `updated_at`, `status`) VALUES
+('2e785c68-1e68-11f1-be96-98eecb02157a', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1', 1, 1, 1, 1, current_timestamp(), NULL, 1),
+('2e785c68-1e68-11f1-be96-98eecb02157a', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2', 1, 1, 1, 1, current_timestamp(), NULL, 1),
+('2e785c68-1e68-11f1-be96-98eecb02157a', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1', 1, 1, 1, 1, current_timestamp(), NULL, 1),
+('2e785c68-1e68-11f1-be96-98eecb02157a', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb2', 1, 1, 1, 1, current_timestamp(), NULL, 1),
+('2e785c68-1e68-11f1-be96-98eecb02157a', 'cccccccc-cccc-cccc-cccc-ccccccccccc1', 1, 1, 1, 1, current_timestamp(), NULL, 1),
+('2e785c68-1e68-11f1-be96-98eecb02157a', 'cccccccc-cccc-cccc-cccc-ccccccccccc2', 1, 1, 1, 1, current_timestamp(), NULL, 1),
+('2e785c68-1e68-11f1-be96-98eecb02157a', 'dddddddd-dddd-dddd-dddd-ddddddddddd1', 0, 1, 0, 0, current_timestamp(), NULL, 1),
+('2e785c68-1e68-11f1-be96-98eecb02157a', 'dddddddd-dddd-dddd-dddd-ddddddddddd2', 0, 1, 0, 0, current_timestamp(), NULL, 1);
+
+--
+-- Ejemplo de auditoria inicial
+--
+
+INSERT INTO `audit_log` (`id`, `user_id`, `module_id`, `view_id`, `action`, `table_name`, `record_id`, `old_value`, `new_value`, `ip_address`, `user_agent`, `created_at`) VALUES
+('77777777-7777-7777-7777-777777777777', '66666666-6666-6666-6666-666666666666', '44444444-4444-4444-4444-444444444444', 'dddddddd-dddd-dddd-dddd-ddddddddddd1', 'CREATE_DATABASE_SECURITY_MODULES', 'module', NULL, NULL, JSON_OBJECT('descripcion', 'Se agregan modulos de usuarios, roles, vistas y auditoria'), '127.0.0.1', 'seed', current_timestamp());
+
 -- Estructura Stand-in para la vista `vw_order_status_summary`
 -- (Véase abajo para la vista actual)
 --
@@ -680,6 +809,26 @@ ALTER TABLE `view`
   ADD UNIQUE KEY `uq_view_module_code` (`module_id`,`code`);
 
 --
+--
+-- Indices de la tabla `role_view`
+--
+ALTER TABLE `role_view`
+  ADD PRIMARY KEY (`role_id`,`view_id`),
+  ADD KEY `fk_role_view_view` (`view_id`);
+
+--
+-- Indices de la tabla `audit_log`
+--
+ALTER TABLE `audit_log`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `fk_audit_user` (`user_id`),
+  ADD KEY `fk_audit_module` (`module_id`),
+  ADD KEY `fk_audit_view` (`view_id`),
+  ADD KEY `idx_audit_action` (`action`),
+  ADD KEY `idx_audit_table_record` (`table_name`,`record_id`),
+  ADD KEY `idx_audit_created_at` (`created_at`);
+
+
 -- Restricciones para tablas volcadas
 --
 
@@ -766,6 +915,22 @@ ALTER TABLE `user_role`
 --
 ALTER TABLE `view`
   ADD CONSTRAINT `fk_view_module` FOREIGN KEY (`module_id`) REFERENCES `module` (`id`) ON DELETE CASCADE;
+
+--
+-- Filtros para la tabla `role_view`
+--
+ALTER TABLE `role_view`
+  ADD CONSTRAINT `fk_role_view_role` FOREIGN KEY (`role_id`) REFERENCES `role` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `fk_role_view_view` FOREIGN KEY (`view_id`) REFERENCES `view` (`id`) ON DELETE CASCADE;
+
+--
+-- Filtros para la tabla `audit_log`
+--
+ALTER TABLE `audit_log`
+  ADD CONSTRAINT `fk_audit_module` FOREIGN KEY (`module_id`) REFERENCES `module` (`id`) ON DELETE SET NULL,
+  ADD CONSTRAINT `fk_audit_user` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`) ON DELETE SET NULL,
+  ADD CONSTRAINT `fk_audit_view` FOREIGN KEY (`view_id`) REFERENCES `view` (`id`) ON DELETE SET NULL;
+
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
