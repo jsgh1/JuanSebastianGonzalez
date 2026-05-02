@@ -278,45 +278,33 @@ Este ejercicio no solicita la solución final enunciada en el documento. El estu
 
 ---
 
-# Solución del ejercicio 03
+---
 
-## Consulta con INNER JOIN
-```sql
-SELECT
-    s.sale_code,
-    i.invoice_number,
-    ist.status_code AS invoice_status,
-    c.iso_currency_code,
-    il.line_number,
-    il.line_description,
-    il.quantity,
-    il.unit_price,
-    t.tax_code,
-    t.rate_percentage,
-    (il.quantity * il.unit_price) AS line_subtotal
-FROM sale s
-INNER JOIN invoice i ON i.sale_id = s.sale_id
-INNER JOIN invoice_status ist ON ist.invoice_status_id = i.invoice_status_id
-INNER JOIN currency c ON c.currency_id = i.currency_id
-INNER JOIN invoice_line il ON il.invoice_id = i.invoice_id
-INNER JOIN tax t ON t.tax_id = il.tax_id
-ORDER BY i.issued_at DESC, il.line_number;
-```
+# Solución corregida del ejercicio 03
 
-## Trigger AFTER INSERT sobre invoice_line
+Esta versión integra el script SQL definitivo correspondiente al ejercicio 03. Está organizada en dos partes:
+
+1. **Setup:** crea o reemplaza la función, el trigger, el procedimiento almacenado y deja la consulta principal del ejercicio.
+2. **Demo:** ejecuta una prueba mínima sobre datos existentes de la base para disparar el procedimiento/trigger y verificar el resultado.
+
+## Archivo `ejercicio_03_setup.sql`
+
 ```sql
 DROP TRIGGER IF EXISTS trg_ai_invoice_line_touch_invoice ON invoice_line;
 DROP FUNCTION IF EXISTS fn_ai_invoice_line_touch_invoice();
+DROP PROCEDURE IF EXISTS sp_add_invoice_line(uuid, uuid, varchar, numeric, numeric);
 
+-- 1. Trigger AFTER sobre invoice_line
+-- Actualiza la marca de tiempo de la factura cabecera cuando se agrega una línea
 CREATE OR REPLACE FUNCTION fn_ai_invoice_line_touch_invoice()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
     UPDATE invoice
-    SET updated_at = now(),
-        notes = coalesce(notes, '') || ' | Línea ' || NEW.line_number || ' registrada: ' || NEW.line_description
+    SET updated_at = now()
     WHERE invoice_id = NEW.invoice_id;
+
     RETURN NEW;
 END;
 $$;
@@ -325,50 +313,108 @@ CREATE TRIGGER trg_ai_invoice_line_touch_invoice
 AFTER INSERT ON invoice_line
 FOR EACH ROW
 EXECUTE FUNCTION fn_ai_invoice_line_touch_invoice();
-```
 
-## Procedimiento almacenado
-```sql
+-- 2. Procedimiento Almacenado
 CREATE OR REPLACE PROCEDURE sp_add_invoice_line(
     p_invoice_id uuid,
     p_tax_id uuid,
     p_line_number integer,
-    p_line_description varchar,
+    p_line_description varchar(255),
     p_quantity numeric,
     p_unit_price numeric
 )
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM invoice_line WHERE invoice_id = p_invoice_id AND line_number = p_line_number) THEN
-        RAISE EXCEPTION 'Ya existe la línea % para la factura %', p_line_number, p_invoice_id;
+    -- Validar cantidades
+    IF p_quantity <= 0 OR p_unit_price < 0 THEN
+        RAISE EXCEPTION 'La cantidad debe ser mayor a cero y el precio no puede ser negativo.';
     END IF;
 
-    INSERT INTO invoice_line (invoice_id, tax_id, line_number, line_description, quantity, unit_price)
-    VALUES (p_invoice_id, p_tax_id, p_line_number, p_line_description, p_quantity, p_unit_price);
+    INSERT INTO invoice_line (
+        invoice_id,
+        tax_id,
+        line_number,
+        line_description,
+        quantity,
+        unit_price
+    )
+    VALUES (
+        p_invoice_id,
+        p_tax_id,
+        p_line_number,
+        p_line_description,
+        p_quantity,
+        p_unit_price
+    );
 END;
 $$;
+
+-- 3. Consulta con INNER JOIN (mínimo 5 tablas)
+-- Requerimiento: Relación entre venta, factura, estado, líneas e impuestos.
+SELECT
+    s.sale_code,
+    i.invoice_number,
+    ist.status_name AS invoice_status,
+    il.line_number,
+    il.line_description,
+    il.quantity,
+    il.unit_price,
+    t.tax_name,
+    curr.iso_currency_code AS currency
+FROM sale s
+INNER JOIN invoice i ON i.sale_id = s.sale_id
+INNER JOIN invoice_status ist ON ist.invoice_status_id = i.invoice_status_id
+INNER JOIN invoice_line il ON il.invoice_id = i.invoice_id
+INNER JOIN tax t ON t.tax_id = il.tax_id
+INNER JOIN currency curr ON curr.currency_id = i.currency_id
+ORDER BY i.invoice_number, il.line_number;
 ```
 
-## Script de demostración
+## Archivo `ejercicio_03_demo.sql`
+
 ```sql
 DO $$
 DECLARE
     v_invoice_id uuid;
     v_tax_id uuid;
-    v_next_line integer;
+    v_next_line_number integer;
+    v_description varchar(200) := 'Servicio de equipaje adicional (Prueba)';
 BEGIN
     SELECT invoice_id INTO v_invoice_id FROM invoice ORDER BY created_at LIMIT 1;
-    SELECT tax_id INTO v_tax_id FROM tax ORDER BY effective_from DESC LIMIT 1;
-    SELECT coalesce(max(line_number), 0) + 1 INTO v_next_line FROM invoice_line WHERE invoice_id = v_invoice_id;
+    SELECT tax_id INTO v_tax_id FROM tax ORDER BY created_at LIMIT 1;
 
-    CALL sp_add_invoice_line(v_invoice_id, v_tax_id, v_next_line, 'Servicio adicional de prueba', 1, 25.00);
+    IF v_invoice_id IS NULL THEN
+        RAISE EXCEPTION 'No se encontró una factura para la prueba.';
+    END IF;
+
+    SELECT coalesce(max(line_number), 0) + 1
+    INTO v_next_line_number
+    FROM invoice_line
+    WHERE invoice_id = v_invoice_id;
+
+    CALL sp_add_invoice_line(
+        v_invoice_id,
+        v_tax_id,
+        v_next_line_number,
+        v_description,
+        1.00,
+        50.00
+    );
 END;
 $$;
 
 SELECT i.invoice_number, i.updated_at, il.line_number, il.line_description, il.quantity, il.unit_price
 FROM invoice i
 INNER JOIN invoice_line il ON il.invoice_id = i.invoice_id
+WHERE il.line_description = 'Servicio de equipaje adicional (Prueba)'
 ORDER BY il.created_at DESC
 LIMIT 5;
+```
+
+## Ejecución recomendada en PostgreSQL
+
+```sql
+\i ejercicio_03_setup.sql
+\i ejercicio_03_demo.sql
 ```

@@ -279,37 +279,25 @@ Este ejercicio no solicita la solución final enunciada en el documento. El estu
 
 ---
 
-# Solución del ejercicio 06
+---
 
-## Consulta con INNER JOIN
-```sql
-SELECT
-    al.airline_name,
-    f.flight_number,
-    f.service_date,
-    fst.status_code AS flight_status,
-    fs.segment_number,
-    ao.iata_code AS origin_airport,
-    ad.iata_code AS destination_airport,
-    drt.reason_name,
-    fd.delay_minutes,
-    fd.reported_at
-FROM airline al
-INNER JOIN flight f ON f.airline_id = al.airline_id
-INNER JOIN flight_status fst ON fst.flight_status_id = f.flight_status_id
-INNER JOIN flight_segment fs ON fs.flight_id = f.flight_id
-INNER JOIN airport ao ON ao.airport_id = fs.origin_airport_id
-INNER JOIN airport ad ON ad.airport_id = fs.destination_airport_id
-INNER JOIN flight_delay fd ON fd.flight_segment_id = fs.flight_segment_id
-INNER JOIN delay_reason_type drt ON drt.delay_reason_type_id = fd.delay_reason_type_id
-ORDER BY fd.reported_at DESC;
-```
+# Solución corregida del ejercicio 06
 
-## Trigger AFTER INSERT sobre flight_delay
+Esta versión integra el script SQL definitivo correspondiente al ejercicio 06. Está organizada en dos partes:
+
+1. **Setup:** crea o reemplaza la función, el trigger, el procedimiento almacenado y deja la consulta principal del ejercicio.
+2. **Demo:** ejecuta una prueba mínima sobre datos existentes de la base para disparar el procedimiento/trigger y verificar el resultado.
+
+## Archivo `ejercicio_06_setup.sql`
+
 ```sql
 DROP TRIGGER IF EXISTS trg_ai_flight_delay_touch_segment ON flight_delay;
+DROP TRIGGER IF EXISTS trg_ai_flight_delay_update_segment ON flight_delay;
 DROP FUNCTION IF EXISTS fn_ai_flight_delay_touch_segment();
+DROP FUNCTION IF EXISTS fn_ai_flight_delay_update_segment();
+DROP PROCEDURE IF EXISTS sp_register_flight_delay(uuid, uuid, integer, text);
 
+-- 1. Trigger AFTER INSERT sobre flight_delay
 CREATE OR REPLACE FUNCTION fn_ai_flight_delay_touch_segment()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -326,36 +314,70 @@ CREATE TRIGGER trg_ai_flight_delay_touch_segment
 AFTER INSERT ON flight_delay
 FOR EACH ROW
 EXECUTE FUNCTION fn_ai_flight_delay_touch_segment();
-```
 
-## Procedimiento almacenado
-```sql
+-- 2. Procedimiento almacenado
 CREATE OR REPLACE PROCEDURE sp_register_flight_delay(
     p_flight_segment_id uuid,
     p_delay_reason_type_id uuid,
-    p_reported_at timestamptz DEFAULT now(),
-    p_delay_minutes integer DEFAULT 1,
+    p_delay_minutes integer,
     p_notes text DEFAULT NULL
 )
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    IF p_delay_minutes <= 0 THEN
+        RAISE EXCEPTION 'Los minutos de retraso deben ser mayores a cero.';
+    END IF;
+
     INSERT INTO flight_delay (flight_segment_id, delay_reason_type_id, reported_at, delay_minutes, notes)
-    VALUES (p_flight_segment_id, p_delay_reason_type_id, p_reported_at, p_delay_minutes, p_notes);
+    VALUES (p_flight_segment_id, p_delay_reason_type_id, now(), p_delay_minutes, p_notes);
 END;
 $$;
+
+-- 3. Consulta con INNER JOIN (mínimo 5 tablas)
+SELECT
+    al.airline_name,
+    f.flight_number,
+    fst.status_name AS flight_status,
+    f.service_date,
+    fs.segment_number,
+    ao.iata_code AS origin_airport,
+    ad.iata_code AS destination_airport,
+    drt.reason_name AS delay_reason,
+    fd.delay_minutes,
+    fd.reported_at
+FROM airline al
+INNER JOIN flight f ON f.airline_id = al.airline_id
+INNER JOIN flight_status fst ON fst.flight_status_id = f.flight_status_id
+INNER JOIN flight_segment fs ON fs.flight_id = f.flight_id
+INNER JOIN airport ao ON ao.airport_id = fs.origin_airport_id
+INNER JOIN airport ad ON ad.airport_id = fs.destination_airport_id
+INNER JOIN flight_delay fd ON fd.flight_segment_id = fs.flight_segment_id
+INNER JOIN delay_reason_type drt ON drt.delay_reason_type_id = fd.delay_reason_type_id
+ORDER BY fd.reported_at DESC;
 ```
 
-## Script de demostración
+## Archivo `ejercicio_06_demo.sql`
+
 ```sql
 DO $$
 DECLARE
-    v_segment_id uuid;
-    v_reason_id uuid;
+    v_flight_segment_id uuid;
+    v_delay_reason_type_id uuid;
 BEGIN
-    SELECT flight_segment_id INTO v_segment_id FROM flight_segment ORDER BY created_at LIMIT 1;
-    SELECT delay_reason_type_id INTO v_reason_id FROM delay_reason_type ORDER BY created_at LIMIT 1;
-    CALL sp_register_flight_delay(v_segment_id, v_reason_id, now(), 35, 'Demora de prueba');
+    SELECT flight_segment_id INTO v_flight_segment_id FROM flight_segment ORDER BY created_at LIMIT 1;
+    SELECT delay_reason_type_id INTO v_delay_reason_type_id FROM delay_reason_type ORDER BY created_at LIMIT 1;
+
+    IF v_flight_segment_id IS NULL OR v_delay_reason_type_id IS NULL THEN
+        RAISE EXCEPTION 'No se encontraron datos base para la prueba de retrasos.';
+    END IF;
+
+    CALL sp_register_flight_delay(
+        v_flight_segment_id,
+        v_delay_reason_type_id,
+        45,
+        'Retraso por condiciones climáticas en origen (Demo)'
+    );
 END;
 $$;
 
@@ -364,4 +386,11 @@ FROM flight_segment fs
 INNER JOIN flight_delay fd ON fd.flight_segment_id = fs.flight_segment_id
 ORDER BY fd.created_at DESC
 LIMIT 5;
+```
+
+## Ejecución recomendada en PostgreSQL
+
+```sql
+\i ejercicio_06_setup.sql
+\i ejercicio_06_demo.sql
 ```

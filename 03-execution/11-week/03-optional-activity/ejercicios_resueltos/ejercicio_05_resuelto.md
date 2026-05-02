@@ -279,10 +279,76 @@ Este ejercicio no solicita la solución final enunciada en el documento. El estu
 
 ---
 
-# Solución del ejercicio 05
+---
 
-## Consulta con INNER JOIN
+# Solución corregida del ejercicio 05
+
+Esta versión integra el script SQL definitivo correspondiente al ejercicio 05. Está organizada en dos partes:
+
+1. **Setup:** crea o reemplaza la función, el trigger, el procedimiento almacenado y deja la consulta principal del ejercicio.
+2. **Demo:** ejecuta una prueba mínima sobre datos existentes de la base para disparar el procedimiento/trigger y verificar el resultado.
+
+## Archivo `ejercicio_05_setup.sql`
+
 ```sql
+DROP TRIGGER IF EXISTS trg_aiu_maintenance_event_touch_aircraft ON maintenance_event;
+DROP TRIGGER IF EXISTS trg_ai_maintenance_event_touch_aircraft ON maintenance_event;
+DROP FUNCTION IF EXISTS fn_aiu_maintenance_event_touch_aircraft();
+DROP FUNCTION IF EXISTS fn_ai_maintenance_event_touch_aircraft();
+DROP PROCEDURE IF EXISTS sp_register_maintenance_event(uuid, uuid, uuid, varchar, timestamptz, timestamptz, text);
+DROP PROCEDURE IF EXISTS sp_register_maintenance_event(uuid, uuid, uuid, varchar, timestamptz, text);
+
+-- 1. Trigger AFTER INSERT OR UPDATE sobre maintenance_event
+CREATE OR REPLACE FUNCTION fn_aiu_maintenance_event_touch_aircraft()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    UPDATE aircraft
+    SET updated_at = now()
+    WHERE aircraft_id = NEW.aircraft_id;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_aiu_maintenance_event_touch_aircraft
+AFTER INSERT OR UPDATE ON maintenance_event
+FOR EACH ROW
+EXECUTE FUNCTION fn_aiu_maintenance_event_touch_aircraft();
+
+-- 2. Procedimiento almacenado
+CREATE OR REPLACE PROCEDURE sp_register_maintenance_event(
+    p_aircraft_id uuid,
+    p_maintenance_type_id uuid,
+    p_maintenance_provider_id uuid,
+    p_status_code varchar,
+    p_started_at timestamptz,
+    p_completed_at timestamptz DEFAULT NULL,
+    p_notes text DEFAULT NULL
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF p_status_code NOT IN ('PLANNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') THEN
+        RAISE EXCEPTION 'Estado de mantenimiento inválido: %', p_status_code;
+    END IF;
+
+    IF p_completed_at IS NOT NULL AND p_completed_at < p_started_at THEN
+        RAISE EXCEPTION 'La fecha de finalización no puede ser anterior al inicio.';
+    END IF;
+
+    INSERT INTO maintenance_event (
+        aircraft_id, maintenance_type_id, maintenance_provider_id,
+        status_code, started_at, completed_at, notes
+    )
+    VALUES (
+        p_aircraft_id, p_maintenance_type_id, p_maintenance_provider_id,
+        p_status_code, p_started_at, p_completed_at, p_notes
+    );
+END;
+$$;
+
+-- 3. Consulta con INNER JOIN (mínimo 5 tablas)
 SELECT
     al.airline_name,
     a.registration_number,
@@ -303,50 +369,8 @@ INNER JOIN maintenance_provider mp ON mp.maintenance_provider_id = me.maintenanc
 ORDER BY me.started_at DESC;
 ```
 
-## Trigger AFTER INSERT OR UPDATE sobre maintenance_event
-```sql
-DROP TRIGGER IF EXISTS trg_aiu_maintenance_event_touch_aircraft ON maintenance_event;
-DROP FUNCTION IF EXISTS fn_aiu_maintenance_event_touch_aircraft();
+## Archivo `ejercicio_05_demo.sql`
 
-CREATE OR REPLACE FUNCTION fn_aiu_maintenance_event_touch_aircraft()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    UPDATE aircraft
-    SET updated_at = now()
-    WHERE aircraft_id = NEW.aircraft_id;
-    RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER trg_aiu_maintenance_event_touch_aircraft
-AFTER INSERT OR UPDATE ON maintenance_event
-FOR EACH ROW
-EXECUTE FUNCTION fn_aiu_maintenance_event_touch_aircraft();
-```
-
-## Procedimiento almacenado
-```sql
-CREATE OR REPLACE PROCEDURE sp_register_maintenance_event(
-    p_aircraft_id uuid,
-    p_maintenance_type_id uuid,
-    p_maintenance_provider_id uuid,
-    p_status_code varchar,
-    p_started_at timestamptz,
-    p_completed_at timestamptz DEFAULT NULL,
-    p_notes text DEFAULT NULL
-)
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    INSERT INTO maintenance_event (aircraft_id, maintenance_type_id, maintenance_provider_id, status_code, started_at, completed_at, notes)
-    VALUES (p_aircraft_id, p_maintenance_type_id, p_maintenance_provider_id, p_status_code, p_started_at, p_completed_at, p_notes);
-END;
-$$;
-```
-
-## Script de demostración
 ```sql
 DO $$
 DECLARE
@@ -358,7 +382,19 @@ BEGIN
     SELECT maintenance_type_id INTO v_type_id FROM maintenance_type ORDER BY created_at LIMIT 1;
     SELECT maintenance_provider_id INTO v_provider_id FROM maintenance_provider ORDER BY created_at LIMIT 1;
 
-    CALL sp_register_maintenance_event(v_aircraft_id, v_type_id, v_provider_id, 'PLANNED', now(), NULL, 'Mantenimiento de prueba');
+    IF v_aircraft_id IS NULL OR v_type_id IS NULL OR v_provider_id IS NULL THEN
+        RAISE EXCEPTION 'No se encontraron datos base para la prueba de mantenimiento.';
+    END IF;
+
+    CALL sp_register_maintenance_event(
+        v_aircraft_id,
+        v_type_id,
+        v_provider_id,
+        'PLANNED',
+        now(),
+        NULL,
+        'Mantenimiento de prueba'
+    );
 END;
 $$;
 
@@ -367,4 +403,11 @@ FROM aircraft a
 INNER JOIN maintenance_event me ON me.aircraft_id = a.aircraft_id
 ORDER BY me.created_at DESC
 LIMIT 5;
+```
+
+## Ejecución recomendada en PostgreSQL
+
+```sql
+\i ejercicio_05_setup.sql
+\i ejercicio_05_demo.sql
 ```

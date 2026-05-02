@@ -286,10 +286,90 @@ Este ejercicio no solicita la solución final enunciada en el documento. El estu
 
 ---
 
-# Solución del ejercicio 09
+---
 
-## Consulta con INNER JOIN
+# Solución corregida del ejercicio 09
+
+Esta versión integra el script SQL definitivo correspondiente al ejercicio 09. Está organizada en dos partes:
+
+1. **Setup:** crea o reemplaza la función, el trigger, el procedimiento almacenado y deja la consulta principal del ejercicio.
+2. **Demo:** ejecuta una prueba mínima sobre datos existentes de la base para disparar el procedimiento/trigger y verificar el resultado.
+
+## Archivo `ejercicio_09_setup.sql`
+
 ```sql
+DROP TRIGGER IF EXISTS trg_aiu_fare_touch_airline ON fare;
+DROP TRIGGER IF EXISTS trg_ai_fare_touch_airline ON fare;
+DROP FUNCTION IF EXISTS fn_aiu_fare_touch_airline();
+DROP FUNCTION IF EXISTS fn_ai_fare_touch_airline();
+DROP PROCEDURE IF EXISTS sp_publish_fare(uuid, uuid, uuid, uuid, uuid, varchar, numeric, date, date, integer, numeric, numeric);
+DROP PROCEDURE IF EXISTS sp_publish_fare(uuid, uuid, uuid, uuid, uuid, varchar, numeric, date, date);
+
+-- 1. Trigger AFTER INSERT OR UPDATE sobre fare
+CREATE OR REPLACE FUNCTION fn_aiu_fare_touch_airline()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    UPDATE airline
+    SET updated_at = now()
+    WHERE airline_id = NEW.airline_id;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_aiu_fare_touch_airline
+AFTER INSERT OR UPDATE ON fare
+FOR EACH ROW
+EXECUTE FUNCTION fn_aiu_fare_touch_airline();
+
+-- 2. Procedimiento almacenado
+CREATE OR REPLACE PROCEDURE sp_publish_fare(
+    p_airline_id uuid,
+    p_origin_airport_id uuid,
+    p_destination_airport_id uuid,
+    p_fare_class_id uuid,
+    p_currency_id uuid,
+    p_fare_code varchar,
+    p_base_amount numeric,
+    p_valid_from date,
+    p_valid_to date DEFAULT NULL,
+    p_baggage_allowance_qty integer DEFAULT 0,
+    p_change_penalty_amount numeric DEFAULT NULL,
+    p_refund_penalty_amount numeric DEFAULT NULL
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF p_origin_airport_id = p_destination_airport_id THEN
+        RAISE EXCEPTION 'El aeropuerto de origen y destino no pueden ser el mismo.';
+    END IF;
+
+    IF p_base_amount < 0 THEN
+        RAISE EXCEPTION 'El monto base no puede ser negativo.';
+    END IF;
+
+    IF p_baggage_allowance_qty < 0 THEN
+        RAISE EXCEPTION 'La franquicia de equipaje no puede ser negativa.';
+    END IF;
+
+    IF p_valid_to IS NOT NULL AND p_valid_to < p_valid_from THEN
+        RAISE EXCEPTION 'La fecha final de validez no puede ser anterior a la inicial.';
+    END IF;
+
+    INSERT INTO fare (
+        airline_id, origin_airport_id, destination_airport_id, fare_class_id, currency_id,
+        fare_code, base_amount, valid_from, valid_to, baggage_allowance_qty,
+        change_penalty_amount, refund_penalty_amount
+    ) VALUES (
+        p_airline_id, p_origin_airport_id, p_destination_airport_id, p_fare_class_id, p_currency_id,
+        p_fare_code, p_base_amount, p_valid_from, p_valid_to, p_baggage_allowance_qty,
+        p_change_penalty_amount, p_refund_penalty_amount
+    );
+END;
+$$;
+
+-- 3. Consulta con INNER JOIN (mínimo 5 tablas)
 SELECT
     al.airline_name,
     f.fare_code,
@@ -313,62 +393,8 @@ INNER JOIN reservation r ON r.reservation_id = s.reservation_id
 ORDER BY f.valid_from DESC, f.fare_code;
 ```
 
-## Trigger AFTER INSERT OR UPDATE sobre fare
-```sql
-DROP TRIGGER IF EXISTS trg_aiu_fare_touch_airline ON fare;
-DROP FUNCTION IF EXISTS fn_aiu_fare_touch_airline();
+## Archivo `ejercicio_09_demo.sql`
 
-CREATE OR REPLACE FUNCTION fn_aiu_fare_touch_airline()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    UPDATE airline
-    SET updated_at = now()
-    WHERE airline_id = NEW.airline_id;
-    RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER trg_aiu_fare_touch_airline
-AFTER INSERT OR UPDATE ON fare
-FOR EACH ROW
-EXECUTE FUNCTION fn_aiu_fare_touch_airline();
-```
-
-## Procedimiento almacenado
-```sql
-CREATE OR REPLACE PROCEDURE sp_publish_fare(
-    p_airline_id uuid,
-    p_origin_airport_id uuid,
-    p_destination_airport_id uuid,
-    p_fare_class_id uuid,
-    p_currency_id uuid,
-    p_fare_code varchar,
-    p_base_amount numeric,
-    p_valid_from date,
-    p_valid_to date DEFAULT NULL,
-    p_baggage_allowance_qty integer DEFAULT 0,
-    p_change_penalty_amount numeric DEFAULT NULL,
-    p_refund_penalty_amount numeric DEFAULT NULL
-)
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    INSERT INTO fare (
-        airline_id, origin_airport_id, destination_airport_id, fare_class_id, currency_id,
-        fare_code, base_amount, valid_from, valid_to, baggage_allowance_qty,
-        change_penalty_amount, refund_penalty_amount
-    ) VALUES (
-        p_airline_id, p_origin_airport_id, p_destination_airport_id, p_fare_class_id, p_currency_id,
-        p_fare_code, p_base_amount, p_valid_from, p_valid_to, p_baggage_allowance_qty,
-        p_change_penalty_amount, p_refund_penalty_amount
-    );
-END;
-$$;
-```
-
-## Script de demostración
 ```sql
 DO $$
 DECLARE
@@ -377,6 +403,7 @@ DECLARE
     v_destination_id uuid;
     v_class_id uuid;
     v_currency_id uuid;
+    v_fare_code varchar(30);
 BEGIN
     SELECT airline_id INTO v_airline_id FROM airline ORDER BY created_at LIMIT 1;
     SELECT airport_id INTO v_origin_id FROM airport ORDER BY created_at LIMIT 1;
@@ -384,8 +411,26 @@ BEGIN
     SELECT fare_class_id INTO v_class_id FROM fare_class ORDER BY created_at LIMIT 1;
     SELECT currency_id INTO v_currency_id FROM currency ORDER BY created_at LIMIT 1;
 
-    CALL sp_publish_fare(v_airline_id, v_origin_id, v_destination_id, v_class_id, v_currency_id,
-        left('FARE-' || replace(gen_random_uuid()::text, '-', ''), 30), 199.99, current_date, current_date + 90, 1, 40.00, 60.00);
+    IF v_airline_id IS NULL OR v_origin_id IS NULL OR v_destination_id IS NULL OR v_class_id IS NULL OR v_currency_id IS NULL THEN
+        RAISE EXCEPTION 'No se encontraron datos base suficientes para la prueba de tarifas.';
+    END IF;
+
+    v_fare_code := left('FARE-' || replace(gen_random_uuid()::text, '-', ''), 30);
+
+    CALL sp_publish_fare(
+        v_airline_id,
+        v_origin_id,
+        v_destination_id,
+        v_class_id,
+        v_currency_id,
+        v_fare_code,
+        199.99,
+        current_date,
+        current_date + 90,
+        1,
+        40.00,
+        60.00
+    );
 END;
 $$;
 
@@ -394,4 +439,11 @@ FROM fare f
 INNER JOIN airline al ON al.airline_id = f.airline_id
 ORDER BY f.created_at DESC
 LIMIT 5;
+```
+
+## Ejecución recomendada en PostgreSQL
+
+```sql
+\i ejercicio_09_setup.sql
+\i ejercicio_09_demo.sql
 ```

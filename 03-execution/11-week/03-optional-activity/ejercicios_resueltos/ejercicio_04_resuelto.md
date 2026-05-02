@@ -280,35 +280,27 @@ Este ejercicio no solicita la solución final enunciada en el documento. El estu
 
 ---
 
-# Solución del ejercicio 04
+---
 
-## Consulta con INNER JOIN
-```sql
-SELECT
-    p.first_name || ' ' || p.last_name AS customer_name,
-    c.customer_since,
-    lp.program_name,
-    la.account_number,
-    lt.tier_name,
-    lat.assigned_at,
-    s.sale_code,
-    s.sold_at
-FROM customer c
-INNER JOIN person p ON p.person_id = c.person_id
-INNER JOIN loyalty_account la ON la.customer_id = c.customer_id
-INNER JOIN loyalty_program lp ON lp.loyalty_program_id = la.loyalty_program_id
-INNER JOIN loyalty_account_tier lat ON lat.loyalty_account_id = la.loyalty_account_id
-INNER JOIN loyalty_tier lt ON lt.loyalty_tier_id = lat.loyalty_tier_id
-INNER JOIN reservation r ON r.booked_by_customer_id = c.customer_id
-INNER JOIN sale s ON s.reservation_id = r.reservation_id
-ORDER BY s.sold_at DESC;
-```
+# Solución corregida del ejercicio 04
 
-## Trigger AFTER INSERT sobre miles_transaction
+Esta versión integra el script SQL definitivo correspondiente al ejercicio 04. Está organizada en dos partes:
+
+1. **Setup:** crea o reemplaza la función, el trigger, el procedimiento almacenado y deja la consulta principal del ejercicio.
+2. **Demo:** ejecuta una prueba mínima sobre datos existentes de la base para disparar el procedimiento/trigger y verificar el resultado.
+
+## Archivo `ejercicio_04_setup.sql`
+
 ```sql
 DROP TRIGGER IF EXISTS trg_ai_miles_transaction_assign_tier ON miles_transaction;
+DROP TRIGGER IF EXISTS trg_ai_miles_transaction_touch_account ON miles_transaction;
 DROP FUNCTION IF EXISTS fn_ai_miles_transaction_assign_tier();
+DROP FUNCTION IF EXISTS fn_ai_miles_transaction_touch_account();
+DROP PROCEDURE IF EXISTS sp_register_miles_transaction(uuid, varchar, integer, timestamptz, varchar, text);
+DROP PROCEDURE IF EXISTS sp_add_miles_transaction(uuid, varchar, integer, varchar, text);
 
+-- 1. Trigger AFTER INSERT sobre miles_transaction
+-- Recalcula el nivel de fidelización según el total acumulado de millas.
 CREATE OR REPLACE FUNCTION fn_ai_miles_transaction_assign_tier()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -331,8 +323,13 @@ BEGIN
     ORDER BY lt.required_miles DESC, lt.priority_level DESC
     LIMIT 1;
 
+    UPDATE loyalty_account
+    SET updated_at = now()
+    WHERE loyalty_account_id = NEW.loyalty_account_id;
+
     IF v_tier_id IS NOT NULL AND NOT EXISTS (
-        SELECT 1 FROM loyalty_account_tier lat
+        SELECT 1
+        FROM loyalty_account_tier lat
         WHERE lat.loyalty_account_id = NEW.loyalty_account_id
           AND lat.loyalty_tier_id = v_tier_id
           AND lat.expires_at IS NULL
@@ -340,6 +337,7 @@ BEGIN
         INSERT INTO loyalty_account_tier (loyalty_account_id, loyalty_tier_id, assigned_at, expires_at)
         VALUES (NEW.loyalty_account_id, v_tier_id, NEW.occurred_at, NULL);
     END IF;
+
     RETURN NEW;
 END;
 $$;
@@ -348,10 +346,8 @@ CREATE TRIGGER trg_ai_miles_transaction_assign_tier
 AFTER INSERT ON miles_transaction
 FOR EACH ROW
 EXECUTE FUNCTION fn_ai_miles_transaction_assign_tier();
-```
 
-## Procedimiento almacenado
-```sql
+-- 2. Procedimiento almacenado
 CREATE OR REPLACE PROCEDURE sp_register_miles_transaction(
     p_loyalty_account_id uuid,
     p_transaction_type varchar,
@@ -367,20 +363,68 @@ BEGIN
         RAISE EXCEPTION 'No existe la cuenta de fidelización %', p_loyalty_account_id;
     END IF;
 
+    IF p_transaction_type NOT IN ('EARN', 'REDEEM', 'ADJUST') THEN
+        RAISE EXCEPTION 'Tipo de transacción inválido: %', p_transaction_type;
+    END IF;
+
+    IF p_miles_delta = 0 THEN
+        RAISE EXCEPTION 'La cantidad de millas no puede ser cero.';
+    END IF;
+
     INSERT INTO miles_transaction (loyalty_account_id, transaction_type, miles_delta, occurred_at, reference_code, notes)
     VALUES (p_loyalty_account_id, p_transaction_type, p_miles_delta, p_occurred_at, p_reference_code, p_notes);
 END;
 $$;
+
+-- 3. Consulta con INNER JOIN (mínimo 5 tablas)
+SELECT
+    p.first_name || ' ' || p.last_name AS customer_name,
+    c.customer_since,
+    lp.program_name,
+    la.account_number,
+    lt.tier_name,
+    lat.assigned_at,
+    s.sale_code,
+    s.sold_at
+FROM customer c
+INNER JOIN person p ON p.person_id = c.person_id
+INNER JOIN loyalty_account la ON la.customer_id = c.customer_id
+INNER JOIN loyalty_program lp ON lp.loyalty_program_id = la.loyalty_program_id
+INNER JOIN loyalty_account_tier lat ON lat.loyalty_account_id = la.loyalty_account_id
+INNER JOIN loyalty_tier lt ON lt.loyalty_tier_id = lat.loyalty_tier_id
+INNER JOIN reservation r ON r.booked_by_customer_id = c.customer_id
+INNER JOIN sale s ON s.reservation_id = r.reservation_id
+ORDER BY s.sold_at DESC;
 ```
 
-## Script de demostración
+## Archivo `ejercicio_04_demo.sql`
+
 ```sql
 DO $$
 DECLARE
     v_loyalty_account_id uuid;
+    v_reference_code varchar(60);
 BEGIN
-    SELECT loyalty_account_id INTO v_loyalty_account_id FROM loyalty_account ORDER BY created_at LIMIT 1;
-    CALL sp_register_miles_transaction(v_loyalty_account_id, 'EARN', 1500, now(), 'DEMO-MILES', 'Acumulación de prueba');
+    SELECT loyalty_account_id
+    INTO v_loyalty_account_id
+    FROM loyalty_account
+    ORDER BY created_at
+    LIMIT 1;
+
+    IF v_loyalty_account_id IS NULL THEN
+        RAISE EXCEPTION 'No se encontró una cuenta de fidelización para la prueba.';
+    END IF;
+
+    v_reference_code := left('DEMO-MILES-' || replace(gen_random_uuid()::text, '-', ''), 60);
+
+    CALL sp_register_miles_transaction(
+        v_loyalty_account_id,
+        'EARN',
+        1500,
+        now(),
+        v_reference_code,
+        'Acumulación de prueba'
+    );
 END;
 $$;
 
@@ -391,4 +435,11 @@ LEFT JOIN loyalty_account_tier lat ON lat.loyalty_account_id = la.loyalty_accoun
 LEFT JOIN loyalty_tier lt ON lt.loyalty_tier_id = lat.loyalty_tier_id
 ORDER BY mt.created_at DESC, lat.assigned_at DESC
 LIMIT 5;
+```
+
+## Ejecución recomendada en PostgreSQL
+
+```sql
+\i ejercicio_04_setup.sql
+\i ejercicio_04_demo.sql
 ```

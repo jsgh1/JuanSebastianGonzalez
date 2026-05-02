@@ -280,10 +280,76 @@ Este ejercicio no solicita la solución final enunciada en el documento. El estu
 
 ---
 
-# Solución del ejercicio 07
+---
 
-## Consulta con INNER JOIN
+# Solución corregida del ejercicio 07
+
+Esta versión integra el script SQL definitivo correspondiente al ejercicio 07. Está organizada en dos partes:
+
+1. **Setup:** crea o reemplaza la función, el trigger, el procedimiento almacenado y deja la consulta principal del ejercicio.
+2. **Demo:** ejecuta una prueba mínima sobre datos existentes de la base para disparar el procedimiento/trigger y verificar el resultado.
+
+## Archivo `ejercicio_07_setup.sql`
+
 ```sql
+DROP TRIGGER IF EXISTS trg_ai_baggage_default_checked_at ON baggage;
+DROP TRIGGER IF EXISTS trg_ai_baggage_touch_segment ON baggage;
+DROP FUNCTION IF EXISTS fn_ai_baggage_default_checked_at();
+DROP FUNCTION IF EXISTS fn_ai_baggage_touch_segment();
+DROP PROCEDURE IF EXISTS sp_register_baggage(uuid, varchar, varchar, varchar, numeric, timestamptz);
+DROP PROCEDURE IF EXISTS sp_register_baggage(uuid, varchar, varchar, varchar, numeric);
+
+-- 1. Trigger AFTER INSERT sobre baggage
+-- Completa checked_at automáticamente si el procedimiento/insert no lo suministra.
+CREATE OR REPLACE FUNCTION fn_ai_baggage_default_checked_at()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.checked_at IS NULL THEN
+        UPDATE baggage
+        SET checked_at = now(), updated_at = now()
+        WHERE baggage_id = NEW.baggage_id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_ai_baggage_default_checked_at
+AFTER INSERT ON baggage
+FOR EACH ROW
+EXECUTE FUNCTION fn_ai_baggage_default_checked_at();
+
+-- 2. Procedimiento almacenado
+CREATE OR REPLACE PROCEDURE sp_register_baggage(
+    p_ticket_segment_id uuid,
+    p_baggage_tag varchar,
+    p_baggage_type varchar,
+    p_baggage_status varchar,
+    p_weight_kg numeric,
+    p_checked_at timestamptz DEFAULT NULL
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF p_baggage_type NOT IN ('CHECKED', 'CARRY_ON', 'SPECIAL') THEN
+        RAISE EXCEPTION 'Tipo de equipaje inválido: %', p_baggage_type;
+    END IF;
+
+    IF p_baggage_status NOT IN ('REGISTERED', 'LOADED', 'CLAIMED', 'LOST') THEN
+        RAISE EXCEPTION 'Estado de equipaje inválido: %', p_baggage_status;
+    END IF;
+
+    IF p_weight_kg <= 0 THEN
+        RAISE EXCEPTION 'El peso debe ser mayor a cero.';
+    END IF;
+
+    INSERT INTO baggage (ticket_segment_id, baggage_tag, baggage_type, baggage_status, weight_kg, checked_at)
+    VALUES (p_ticket_segment_id, p_baggage_tag, p_baggage_type, p_baggage_status, p_weight_kg, p_checked_at);
+END;
+$$;
+
+-- 3. Consulta con INNER JOIN (mínimo 5 tablas)
 SELECT
     t.ticket_number,
     ts.segment_sequence_no,
@@ -308,58 +374,34 @@ INNER JOIN baggage b ON b.ticket_segment_id = ts.ticket_segment_id
 ORDER BY f.service_date DESC, t.ticket_number;
 ```
 
-## Trigger AFTER INSERT sobre baggage
-```sql
-DROP TRIGGER IF EXISTS trg_ai_baggage_default_checked_at ON baggage;
-DROP FUNCTION IF EXISTS fn_ai_baggage_default_checked_at();
+## Archivo `ejercicio_07_demo.sql`
 
-CREATE OR REPLACE FUNCTION fn_ai_baggage_default_checked_at()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    IF NEW.checked_at IS NULL THEN
-        UPDATE baggage
-        SET checked_at = now(), updated_at = now()
-        WHERE baggage_id = NEW.baggage_id;
-    END IF;
-    RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER trg_ai_baggage_default_checked_at
-AFTER INSERT ON baggage
-FOR EACH ROW
-EXECUTE FUNCTION fn_ai_baggage_default_checked_at();
-```
-
-## Procedimiento almacenado
-```sql
-CREATE OR REPLACE PROCEDURE sp_register_baggage(
-    p_ticket_segment_id uuid,
-    p_baggage_tag varchar,
-    p_baggage_type varchar,
-    p_baggage_status varchar,
-    p_weight_kg numeric,
-    p_checked_at timestamptz DEFAULT NULL
-)
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    INSERT INTO baggage (ticket_segment_id, baggage_tag, baggage_type, baggage_status, weight_kg, checked_at)
-    VALUES (p_ticket_segment_id, p_baggage_tag, p_baggage_type, p_baggage_status, p_weight_kg, p_checked_at);
-END;
-$$;
-```
-
-## Script de demostración
 ```sql
 DO $$
 DECLARE
     v_ticket_segment_id uuid;
+    v_tag varchar(30);
 BEGIN
-    SELECT ticket_segment_id INTO v_ticket_segment_id FROM ticket_segment ORDER BY created_at LIMIT 1;
-    CALL sp_register_baggage(v_ticket_segment_id, left('BAG-' || replace(gen_random_uuid()::text, '-', ''), 30), 'CHECKED', 'REGISTERED', 18.50, NULL);
+    SELECT ts.ticket_segment_id
+    INTO v_ticket_segment_id
+    FROM ticket_segment ts
+    ORDER BY ts.created_at
+    LIMIT 1;
+
+    IF v_ticket_segment_id IS NULL THEN
+        RAISE EXCEPTION 'No se encontró un segmento de tiquete disponible para la prueba.';
+    END IF;
+
+    v_tag := left('BAG-' || replace(gen_random_uuid()::text, '-', ''), 30);
+
+    CALL sp_register_baggage(
+        v_ticket_segment_id,
+        v_tag,
+        'CHECKED',
+        'REGISTERED',
+        18.50,
+        NULL
+    );
 END;
 $$;
 
@@ -367,4 +409,11 @@ SELECT b.baggage_tag, b.baggage_status, b.weight_kg, b.checked_at
 FROM baggage b
 ORDER BY b.created_at DESC
 LIMIT 5;
+```
+
+## Ejecución recomendada en PostgreSQL
+
+```sql
+\i ejercicio_07_setup.sql
+\i ejercicio_07_demo.sql
 ```

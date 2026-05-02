@@ -270,34 +270,24 @@ Este ejercicio no solicita la solución final enunciada en el documento. El estu
 
 ---
 
-# Solución del ejercicio 08
+---
 
-## Consulta con INNER JOIN
-```sql
-SELECT
-    p.first_name || ' ' || p.last_name AS person_name,
-    ua.username,
-    us.status_code AS user_status,
-    sr.role_code,
-    sr.role_name,
-    sp.permission_code,
-    sp.permission_name,
-    ur.assigned_at
-FROM person p
-INNER JOIN user_account ua ON ua.person_id = p.person_id
-INNER JOIN user_status us ON us.user_status_id = ua.user_status_id
-INNER JOIN user_role ur ON ur.user_account_id = ua.user_account_id
-INNER JOIN security_role sr ON sr.security_role_id = ur.security_role_id
-INNER JOIN role_permission rp ON rp.security_role_id = sr.security_role_id
-INNER JOIN security_permission sp ON sp.security_permission_id = rp.security_permission_id
-ORDER BY ua.username, sr.role_code, sp.permission_code;
-```
+# Solución corregida del ejercicio 08
 
-## Trigger AFTER INSERT sobre user_role
+Esta versión integra el script SQL definitivo correspondiente al ejercicio 08. Está organizada en dos partes:
+
+1. **Setup:** crea o reemplaza la función, el trigger, el procedimiento almacenado y deja la consulta principal del ejercicio.
+2. **Demo:** ejecuta una prueba mínima sobre datos existentes de la base para disparar el procedimiento/trigger y verificar el resultado.
+
+## Archivo `ejercicio_08_setup.sql`
+
 ```sql
 DROP TRIGGER IF EXISTS trg_ai_user_role_touch_account ON user_role;
 DROP FUNCTION IF EXISTS fn_ai_user_role_touch_account();
+DROP PROCEDURE IF EXISTS sp_assign_user_role(uuid, uuid, uuid);
 
+-- 1. Trigger AFTER sobre user_role
+-- Actualiza la marca de tiempo de la cuenta de usuario cuando se asigna un nuevo rol
 CREATE OR REPLACE FUNCTION fn_ai_user_role_touch_account()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -306,6 +296,7 @@ BEGIN
     UPDATE user_account
     SET updated_at = now()
     WHERE user_account_id = NEW.user_account_id;
+
     RETURN NEW;
 END;
 $$;
@@ -314,46 +305,111 @@ CREATE TRIGGER trg_ai_user_role_touch_account
 AFTER INSERT ON user_role
 FOR EACH ROW
 EXECUTE FUNCTION fn_ai_user_role_touch_account();
-```
 
-## Procedimiento almacenado
-```sql
+-- 2. Procedimiento Almacenado
 CREATE OR REPLACE PROCEDURE sp_assign_user_role(
     p_user_account_id uuid,
     p_security_role_id uuid,
-    p_assigned_by_user_id uuid DEFAULT NULL,
-    p_assigned_at timestamptz DEFAULT now()
+    p_assigned_by_user_id uuid
 )
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    INSERT INTO user_role (user_account_id, security_role_id, assigned_at, assigned_by_user_id)
-    VALUES (p_user_account_id, p_security_role_id, p_assigned_at, p_assigned_by_user_id)
-    ON CONFLICT (user_account_id, security_role_id) DO NOTHING;
+    -- Validar si el rol ya está asignado
+    IF EXISTS (
+        SELECT 1 FROM user_role 
+        WHERE user_account_id = p_user_account_id 
+        AND security_role_id = p_security_role_id
+    ) THEN
+        RAISE EXCEPTION 'El rol ya está asignado a este usuario.';
+    END IF;
+
+    INSERT INTO user_role (
+        user_account_id,
+        security_role_id,
+        assigned_by_user_id,
+        assigned_at
+    )
+    VALUES (
+        p_user_account_id,
+        p_security_role_id,
+        p_assigned_by_user_id,
+        now()
+    );
 END;
 $$;
+
+-- 3. Consulta con INNER JOIN (mínimo 5 tablas)
+-- Requerimiento: persona, usuario, estado, rol, fecha asignación y permiso.
+SELECT
+    p.first_name || ' ' || p.last_name AS persona,
+    ua.username AS usuario,
+    us.status_name AS estado_usuario,
+    sr.role_name AS rol_asignado,
+    ur.assigned_at AS fecha_asignacion,
+    sp.permission_name AS permiso_asociado
+FROM user_account ua
+INNER JOIN person p ON p.person_id = ua.person_id
+INNER JOIN user_status us ON us.user_status_id = ua.user_status_id
+INNER JOIN user_role ur ON ur.user_account_id = ua.user_account_id
+INNER JOIN security_role sr ON sr.security_role_id = ur.security_role_id
+INNER JOIN role_permission rp ON rp.security_role_id = sr.security_role_id
+INNER JOIN security_permission sp ON sp.security_permission_id = rp.security_permission_id
+ORDER BY ua.username, sr.role_name;
 ```
 
-## Script de demostración
+## Archivo `ejercicio_08_demo.sql`
+
 ```sql
 DO $$
 DECLARE
-    v_user_id uuid;
-    v_role_id uuid;
-    v_assigner_id uuid;
+    v_user_account_id uuid;
+    v_security_role_id uuid;
+    v_admin_user_id uuid;
 BEGIN
-    SELECT user_account_id INTO v_user_id FROM user_account ORDER BY created_at LIMIT 1;
-    SELECT security_role_id INTO v_role_id FROM security_role ORDER BY created_at LIMIT 1;
-    SELECT user_account_id INTO v_assigner_id FROM user_account ORDER BY created_at DESC LIMIT 1;
+    -- 1. Buscar una cuenta de usuario que no tenga todos los roles
+    SELECT user_account_id INTO v_user_account_id FROM user_account LIMIT 1;
 
-    CALL sp_assign_user_role(v_user_id, v_role_id, v_assigner_id, now());
+    -- 2. Buscar un rol de seguridad
+    SELECT security_role_id INTO v_security_role_id FROM security_role LIMIT 1;
+
+    -- 3. Buscar un usuario administrador (el mismo o cualquier otro para la prueba)
+    SELECT user_account_id INTO v_admin_user_id FROM user_account LIMIT 1;
+
+    IF v_user_account_id IS NULL OR v_security_role_id IS NULL THEN
+        RAISE EXCEPTION 'No se encontraron datos base para la prueba de seguridad.';
+    END IF;
+
+    -- 4. Intentar asignar (manejar si ya existe para que la demo no falle)
+    BEGIN
+        CALL sp_assign_user_role(
+            v_user_account_id,
+            v_security_role_id,
+            v_admin_user_id
+        );
+        RAISE NOTICE 'Rol asignado exitosamente al usuario %', v_user_account_id;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'El rol ya estaba asignado o hubo un error: %', SQLERRM;
+    END;
 END;
 $$;
 
-SELECT ua.username, ua.updated_at, sr.role_code, ur.assigned_at
+-- 5. Verificación
+SELECT 
+    ua.username,
+    ua.updated_at AS user_last_update,
+    sr.role_name,
+    ur.assigned_at
 FROM user_account ua
 INNER JOIN user_role ur ON ur.user_account_id = ua.user_account_id
 INNER JOIN security_role sr ON sr.security_role_id = ur.security_role_id
 ORDER BY ur.created_at DESC
-LIMIT 5;
+LIMIT 1;
+```
+
+## Ejecución recomendada en PostgreSQL
+
+```sql
+\i ejercicio_08_setup.sql
+\i ejercicio_08_demo.sql
 ```

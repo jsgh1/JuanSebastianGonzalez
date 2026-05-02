@@ -278,10 +278,74 @@ Este ejercicio no solicita la solución final enunciada en el documento. El estu
 
 ---
 
-# Solución del ejercicio 10
+---
 
-## Consulta con INNER JOIN
+# Solución corregida del ejercicio 10
+
+Esta versión integra el script SQL definitivo correspondiente al ejercicio 10. Está organizada en dos partes:
+
+1. **Setup:** crea o reemplaza la función, el trigger, el procedimiento almacenado y deja la consulta principal del ejercicio.
+2. **Demo:** ejecuta una prueba mínima sobre datos existentes de la base para disparar el procedimiento/trigger y verificar el resultado.
+
+## Archivo `ejercicio_10_setup.sql`
+
 ```sql
+DROP TRIGGER IF EXISTS trg_aiu_person_contact_touch_person ON person_contact;
+DROP TRIGGER IF EXISTS trg_ai_person_document_touch_person ON person_document;
+DROP FUNCTION IF EXISTS fn_aiu_person_contact_touch_person();
+DROP FUNCTION IF EXISTS fn_ai_person_document_touch_person();
+DROP PROCEDURE IF EXISTS sp_register_person_contact(uuid, uuid, varchar, boolean);
+DROP PROCEDURE IF EXISTS sp_register_person_document(uuid, uuid, uuid, varchar, date, date);
+
+-- 1. Trigger AFTER INSERT OR UPDATE sobre person_contact
+CREATE OR REPLACE FUNCTION fn_aiu_person_contact_touch_person()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    UPDATE person
+    SET updated_at = now()
+    WHERE person_id = NEW.person_id;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_aiu_person_contact_touch_person
+AFTER INSERT OR UPDATE ON person_contact
+FOR EACH ROW
+EXECUTE FUNCTION fn_aiu_person_contact_touch_person();
+
+-- 2. Procedimiento almacenado
+CREATE OR REPLACE PROCEDURE sp_register_person_contact(
+    p_person_id uuid,
+    p_contact_type_id uuid,
+    p_contact_value varchar,
+    p_is_primary boolean DEFAULT false
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM person WHERE person_id = p_person_id) THEN
+        RAISE EXCEPTION 'No existe la persona %', p_person_id;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM contact_type WHERE contact_type_id = p_contact_type_id) THEN
+        RAISE EXCEPTION 'No existe el tipo de contacto %', p_contact_type_id;
+    END IF;
+
+    IF p_is_primary THEN
+        UPDATE person_contact
+        SET is_primary = false, updated_at = now()
+        WHERE person_id = p_person_id
+          AND contact_type_id = p_contact_type_id;
+    END IF;
+
+    INSERT INTO person_contact (person_id, contact_type_id, contact_value, is_primary)
+    VALUES (p_person_id, p_contact_type_id, p_contact_value, p_is_primary);
+END;
+$$;
+
+-- 3. Consulta con INNER JOIN (mínimo 5 tablas)
 SELECT
     p.first_name || ' ' || p.last_name AS passenger_name,
     pt.type_name AS person_type,
@@ -302,65 +366,30 @@ INNER JOIN reservation r ON r.reservation_id = rp.reservation_id
 ORDER BY r.booked_at DESC, rp.passenger_sequence_no;
 ```
 
-## Trigger AFTER INSERT OR UPDATE sobre person_contact
-```sql
-DROP TRIGGER IF EXISTS trg_aiu_person_contact_touch_person ON person_contact;
-DROP FUNCTION IF EXISTS fn_aiu_person_contact_touch_person();
+## Archivo `ejercicio_10_demo.sql`
 
-CREATE OR REPLACE FUNCTION fn_aiu_person_contact_touch_person()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    UPDATE person
-    SET updated_at = now()
-    WHERE person_id = NEW.person_id;
-    RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER trg_aiu_person_contact_touch_person
-AFTER INSERT OR UPDATE ON person_contact
-FOR EACH ROW
-EXECUTE FUNCTION fn_aiu_person_contact_touch_person();
-```
-
-## Procedimiento almacenado
-```sql
-CREATE OR REPLACE PROCEDURE sp_register_person_contact(
-    p_person_id uuid,
-    p_contact_type_id uuid,
-    p_contact_value varchar,
-    p_is_primary boolean DEFAULT false
-)
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    IF p_is_primary THEN
-        UPDATE person_contact
-        SET is_primary = false, updated_at = now()
-        WHERE person_id = p_person_id
-          AND contact_type_id = p_contact_type_id;
-    END IF;
-
-    INSERT INTO person_contact (person_id, contact_type_id, contact_value, is_primary)
-    VALUES (p_person_id, p_contact_type_id, p_contact_value, p_is_primary);
-END;
-$$;
-```
-
-## Script de demostración
 ```sql
 DO $$
 DECLARE
     v_person_id uuid;
     v_contact_type_id uuid;
+    v_contact_value varchar(180);
 BEGIN
     SELECT person_id INTO v_person_id FROM person ORDER BY created_at LIMIT 1;
     SELECT contact_type_id INTO v_contact_type_id FROM contact_type ORDER BY created_at LIMIT 1;
 
-    CALL sp_register_person_contact(v_person_id, v_contact_type_id,
-        'demo-' || left(replace(gen_random_uuid()::text, '-', ''), 12) || '@correo.test', true);
+    IF v_person_id IS NULL OR v_contact_type_id IS NULL THEN
+        RAISE EXCEPTION 'No se encontraron datos base suficientes para la prueba de identidad/contacto.';
+    END IF;
+
+    v_contact_value := 'demo-' || left(replace(gen_random_uuid()::text, '-', ''), 12) || '@correo.test';
+
+    CALL sp_register_person_contact(
+        v_person_id,
+        v_contact_type_id,
+        v_contact_value,
+        true
+    );
 END;
 $$;
 
@@ -370,4 +399,11 @@ INNER JOIN person_contact pc ON pc.person_id = p.person_id
 INNER JOIN contact_type ct ON ct.contact_type_id = pc.contact_type_id
 ORDER BY pc.created_at DESC
 LIMIT 5;
+```
+
+## Ejecución recomendada en PostgreSQL
+
+```sql
+\i ejercicio_10_setup.sql
+\i ejercicio_10_demo.sql
 ```

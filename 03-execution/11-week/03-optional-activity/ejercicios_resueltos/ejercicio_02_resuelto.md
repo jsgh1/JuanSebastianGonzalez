@@ -282,53 +282,50 @@ Este ejercicio no solicita la solución final enunciada en el documento. El estu
 
 ---
 
-# Solución del ejercicio 02
+---
 
-## Consulta con INNER JOIN
-```sql
-SELECT
-    r.reservation_code,
-    s.sale_code,
-    c.iso_currency_code,
-    p.payment_reference,
-    ps.status_code AS payment_status,
-    pm.method_code AS payment_method,
-    p.amount AS payment_amount,
-    pt.transaction_reference,
-    pt.transaction_type,
-    pt.transaction_amount,
-    pt.processed_at
-FROM sale s
-INNER JOIN reservation r ON r.reservation_id = s.reservation_id
-INNER JOIN currency c ON c.currency_id = s.currency_id
-INNER JOIN payment p ON p.sale_id = s.sale_id
-INNER JOIN payment_status ps ON ps.payment_status_id = p.payment_status_id
-INNER JOIN payment_method pm ON pm.payment_method_id = p.payment_method_id
-INNER JOIN payment_transaction pt ON pt.payment_id = p.payment_id
-ORDER BY pt.processed_at DESC;
-```
+# Solución corregida del ejercicio 02
 
-## Trigger AFTER INSERT sobre payment_transaction
+Esta versión integra el script SQL definitivo correspondiente al ejercicio 02. Está organizada en dos partes:
+
+1. **Setup:** crea o reemplaza la función, el trigger, el procedimiento almacenado y deja la consulta principal del ejercicio.
+2. **Demo:** ejecuta una prueba mínima sobre datos existentes de la base para disparar el procedimiento/trigger y verificar el resultado.
+
+## Archivo `ejercicio_02_setup.sql`
+
 ```sql
 DROP TRIGGER IF EXISTS trg_ai_payment_transaction_refund ON payment_transaction;
+DROP TRIGGER IF EXISTS trg_ai_payment_transaction_create_refund ON payment_transaction;
 DROP FUNCTION IF EXISTS fn_ai_payment_transaction_refund();
+DROP FUNCTION IF EXISTS fn_ai_payment_transaction_create_refund();
+DROP PROCEDURE IF EXISTS sp_register_payment_transaction(uuid, varchar, numeric, timestamptz, text);
 
+-- 1. Trigger AFTER INSERT sobre payment_transaction
+-- Si la transacción es REFUND o REVERSAL, genera automáticamente el registro en refund.
 CREATE OR REPLACE FUNCTION fn_ai_payment_transaction_refund()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
     IF NEW.transaction_type IN ('REFUND', 'REVERSAL') THEN
-        INSERT INTO refund (payment_id, refund_reference, amount, requested_at, processed_at, refund_reason)
+        INSERT INTO refund (
+            payment_id,
+            refund_reference,
+            amount,
+            requested_at,
+            processed_at,
+            refund_reason
+        )
         VALUES (
             NEW.payment_id,
-            left('RF-' || replace(NEW.payment_transaction_id::text, '-', ''), 40),
+            left('REF-' || replace(NEW.payment_transaction_id::text, '-', ''), 40),
             NEW.transaction_amount,
             NEW.processed_at,
-            CASE WHEN NEW.transaction_type = 'REFUND' THEN NEW.processed_at ELSE NULL END,
-            coalesce(NEW.provider_message, 'Generado automáticamente por transacción ' || NEW.transaction_type)
+            NEW.processed_at,
+            'Generado automáticamente por transacción ' || NEW.transaction_type || COALESCE(': ' || NEW.provider_message, '')
         );
     END IF;
+
     RETURN NEW;
 END;
 $$;
@@ -337,10 +334,8 @@ CREATE TRIGGER trg_ai_payment_transaction_refund
 AFTER INSERT ON payment_transaction
 FOR EACH ROW
 EXECUTE FUNCTION fn_ai_payment_transaction_refund();
-```
 
-## Procedimiento almacenado
-```sql
+-- 2. Procedimiento almacenado
 CREATE OR REPLACE PROCEDURE sp_register_payment_transaction(
     p_payment_id uuid,
     p_transaction_type varchar,
@@ -350,15 +345,34 @@ CREATE OR REPLACE PROCEDURE sp_register_payment_transaction(
 )
 LANGUAGE plpgsql
 AS $$
+DECLARE
+    v_transaction_reference varchar(60);
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM payment WHERE payment_id = p_payment_id) THEN
         RAISE EXCEPTION 'No existe el pago %', p_payment_id;
     END IF;
 
-    INSERT INTO payment_transaction (payment_id, transaction_reference, transaction_type, transaction_amount, processed_at, provider_message)
+    IF p_transaction_type NOT IN ('AUTH', 'CAPTURE', 'VOID', 'REFUND', 'REVERSAL') THEN
+        RAISE EXCEPTION 'Tipo de transacción inválido: %', p_transaction_type;
+    END IF;
+
+    IF p_transaction_amount <= 0 THEN
+        RAISE EXCEPTION 'El monto de la transacción debe ser mayor a cero.';
+    END IF;
+
+    v_transaction_reference := left('TXN-' || replace(gen_random_uuid()::text, '-', ''), 60);
+
+    INSERT INTO payment_transaction (
+        payment_id,
+        transaction_reference,
+        transaction_type,
+        transaction_amount,
+        processed_at,
+        provider_message
+    )
     VALUES (
         p_payment_id,
-        left('PT-' || replace(gen_random_uuid()::text, '-', ''), 60),
+        v_transaction_reference,
         p_transaction_type,
         p_transaction_amount,
         p_processed_at,
@@ -366,24 +380,78 @@ BEGIN
     );
 END;
 $$;
+
+-- 3. Consulta con INNER JOIN (mínimo 5 tablas)
+SELECT
+    s.sale_code,
+    r.reservation_code,
+    p.payment_reference,
+    ps.status_name AS payment_status,
+    pm.method_name AS payment_method,
+    pt.transaction_reference,
+    pt.transaction_type,
+    pt.transaction_amount,
+    c.iso_currency_code
+FROM sale s
+INNER JOIN reservation r ON r.reservation_id = s.reservation_id
+INNER JOIN payment p ON p.sale_id = s.sale_id
+INNER JOIN payment_status ps ON ps.payment_status_id = p.payment_status_id
+INNER JOIN payment_method pm ON pm.payment_method_id = p.payment_method_id
+INNER JOIN payment_transaction pt ON pt.payment_id = p.payment_id
+INNER JOIN currency c ON c.currency_id = p.currency_id
+ORDER BY pt.processed_at DESC;
 ```
 
-## Script de demostración
+## Archivo `ejercicio_02_demo.sql`
+
 ```sql
 DO $$
 DECLARE
     v_payment_id uuid;
-    v_amount numeric(12,2);
 BEGIN
-    SELECT payment_id, amount INTO v_payment_id, v_amount FROM payment ORDER BY created_at LIMIT 1;
-    CALL sp_register_payment_transaction(v_payment_id, 'REFUND', v_amount, now(), 'Prueba de devolución automática');
+    -- 1. Buscar un pago existente
+    SELECT payment_id
+    INTO v_payment_id
+    FROM payment
+    LIMIT 1;
+
+    IF v_payment_id IS NULL THEN
+        RAISE EXCEPTION 'No se encontró un pago para la prueba.';
+    END IF;
+
+    -- 2. Invocar el procedimiento simulando una transacción de DEVOLUCIÓN ('REFUND')
+    -- Esto disparará el trigger y creará un registro en la tabla refund
+    CALL sp_register_payment_transaction(
+        v_payment_id,
+        'REFUND',  -- Tipo de transacción que activa el trigger
+        150.00,    -- Monto
+        now(),
+        'Devolución parcial solicitada por el cliente'
+    );
+
+    RAISE NOTICE 'Transacción de tipo REFUND registrada para el pago %', v_payment_id;
 END;
 $$;
 
-SELECT p.payment_reference, pt.transaction_reference, pt.transaction_type, r.refund_reference, r.amount
-FROM payment p
-INNER JOIN payment_transaction pt ON pt.payment_id = p.payment_id
-INNER JOIN refund r ON r.payment_id = p.payment_id
-ORDER BY r.created_at DESC
-LIMIT 5;
+-- 3. Verificación de la Transacción y la Devolución (creada por el trigger)
+SELECT 
+    pt.transaction_reference,
+    pt.transaction_type,
+    pt.transaction_amount,
+    r.refund_reference,
+    r.amount,
+    r.refund_reason
+FROM payment_transaction pt
+INNER JOIN refund r ON r.payment_id = pt.payment_id
+-- Relacionamos por fecha de procesamiento y monto para encontrar la que acabamos de crear
+WHERE pt.transaction_type = 'REFUND'
+ORDER BY pt.created_at DESC
+LIMIT 1;
+```
+
+## Ejecución recomendada en PostgreSQL
+
+```sql
+\i ejercicio_02_setup.sql
+\i ejercicio_02_demo.sql
 ```
